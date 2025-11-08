@@ -1,71 +1,72 @@
-pipeline {
-  agent any
+timestamps {
+  pipeline {
+    agent any
 
-  environment {
-    ACR = "demoacrg4p93s.azurecr.io"
-    IMAGE = "demo-app"
-    TAG = "v${BUILD_NUMBER}"
-    K8S_NS = "default"
-  }
-
-  options {
-    timestamps()
-  }
-
-  stages {
-    stage('Checkout Code') {
-      steps {
-        git branch: 'main',
-            url: 'https://github.com/automation-quokkalabs/demo-app.git',
-            credentialsId: 'github-token'
-      }
+    environment {
+      ACR_LOGIN = "demoacrg4p93s.azurecr.io"
+      IMAGE_NAME = "demo-app"
+      IMAGE_TAG = "v${env.BUILD_NUMBER}"
+      KUBE_NS = "default"
+      GIT_REPO = "https://github.com/automation-quokkalabs/demo-app.git"
+      GIT_BRANCH = "devops-assessment" // change if needed
     }
 
-    stage('Build Docker Image') {
-      steps {
-        sh '''
-          echo "🧱 Building Docker image..."
-          docker build -t ${ACR}/${IMAGE}:${TAG} .
-        '''
-      }
+    triggers {
+      githubPush()
     }
 
-    stage('Push to ACR') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+    stages {
+      stage('Checkout') {
+        steps {
+          git branch: env.GIT_BRANCH,
+              url: env.GIT_REPO,
+              credentialsId: 'github-token'
+        }
+      }
+
+      stage('Build Docker image') {
+        steps {
           sh '''
-            echo "🔐 Logging in to ACR..."
-            echo "$ACR_PASS" | docker login ${ACR} -u "$ACR_USER" --password-stdin
-
-            echo "📤 Pushing image to ACR..."
-            docker push ${ACR}/${IMAGE}:${TAG}
+            echo "Building ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}"
+            docker build -t ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG} .
           '''
         }
       }
-    }
 
-    stage('Deploy to AKS') {
-      steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            export KUBECONFIG="$KUBECONFIG_FILE"
-
-            echo "🚀 Deploying to AKS..."
-            if kubectl get deployment demo-app -n ${K8S_NS} >/dev/null 2>&1; then
-              echo "🔄 Updating existing deployment image..."
-              kubectl set image deployment/demo-app demo-app=${ACR}/${IMAGE}:${TAG} -n ${K8S_NS} --record
-            else
-              echo "🆕 Creating new deployment..."
-              sed "s|REPLACE_IMAGE|${ACR}/${IMAGE}:${TAG}|g" k8s/deployment.yaml | kubectl apply -f -
-              kubectl apply -f k8s/service.yaml
-              kubectl apply -f k8s/ingress.yaml
-            fi
-
-            kubectl rollout status deployment/demo-app -n ${K8S_NS} --timeout=180s
-          '''
+      stage('Login & Push to ACR') {
+        steps {
+          withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+            sh '''
+              echo "Logging in to ACR..."
+              echo "$ACR_PASS" | docker login ${ACR_LOGIN} -u "$ACR_USER" --password-stdin
+              echo "Pushing image..."
+              docker push ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}
+            '''
+          }
         }
       }
-    }
-  }
+
+      stage('Deploy to AKS') {
+        steps {
+          withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
+            sh '''
+              export KUBECONFIG="$KUBECONFIG_FILE"
+              echo "Deploying image to AKS..."
+
+              # If deployment exists, update image; else apply manifests
+              if kubectl get deployment demo-app -n ${KUBE_NS} >/dev/null 2>&1; then
+                kubectl set image deployment/demo-app demo-app=${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG} -n ${KUBE_NS} --record
+              else
+                sed "s|REPLACE_IMAGE|${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml | kubectl apply -f -
+                kubectl apply -f k8s/service.yaml
+                kubectl apply -f k8s/ingress.yaml
+              fi
+
+              kubectl rollout status deployment/demo-app -n ${KUBE_NS} --timeout=180s
+            '''
+          }
+        }
+      }
+   }
 }
-
+}
