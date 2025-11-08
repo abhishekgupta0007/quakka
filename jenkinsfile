@@ -2,7 +2,6 @@ pipeline {
   agent any
 
   options {
-    timestamps()
     disableConcurrentBuilds()
   }
 
@@ -69,21 +68,6 @@ pipeline {
           '''
         }
       }
-    }
-  }
-
-  post {
-    success {
-      echo "✅ Build and deploy succeeded: ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}"
-      mail to: 'ananda.yashaswi@quokkalabs.com,ayush.vashishth@quokkalabs.com',
-           subject: "✅ SUCCESS: Build #${BUILD_NUMBER} - ${IMAGE_NAME}:${IMAGE_TAG}",
-           body: "Deployment succeeded: ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}"
-    }
-    failure {
-      echo "❌ Build or deploy failed"
-      mail to: 'ananda.yashaswi@quokkalabs.com,ayush.vashishth@quokkalabs.com',
-           subject: "❌ FAILURE: Build #${BUILD_NUMBER}",
-           body: "Jenkins build #${BUILD_NUMBER} failed. Check console output."
     }
   }
 }
