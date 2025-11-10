@@ -5,7 +5,7 @@ pipeline {
     GIT_REPO = 'https://github.com/abhishekgupta0007/quakka.git'
     GIT_BRANCH = 'devops-assessment'
     IMAGE_NAME = 'demo-app'
-    ACR_NAME = 'demoacrg4p93s.azurecr.io'
+    ACR_NAME = 'demoacrg4p93s'
     IMAGE_TAG = "v${BUILD_NUMBER}"
     AKS_NAMESPACE = 'default'
   }
@@ -18,24 +18,20 @@ pipeline {
       }
     }
 
-    stage('Build Docker image') {
+    stage('Build & Push Image using ACR Tasks') {
       steps {
         script {
-          echo "Building image ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
-          sh """
-            docker build -t ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG} .
-          """
-        }
-      }
-    }
-
-    stage('Login & Push to ACR') {
-      steps {
-        script {
-          withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+          withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'APP_ID', passwordVariable: 'APP_SECRET')]) {
             sh """
-              echo $ACR_PASS | docker login ${ACR_NAME} -u $ACR_USER --password-stdin
-              docker push ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}
+              echo "🔐 Logging into Azure..."
+              az login --service-principal -u $APP_ID -p $APP_SECRET --tenant 310d0bfe-c9eb-45be-ad84-6b2502b3a3d7
+              az acr login --name ${ACR_NAME}
+
+              echo "🚀 Triggering ACR cloud build..."
+              az acr build \
+                --registry ${ACR_NAME} \
+                --image ${IMAGE_NAME}:${IMAGE_TAG} \
+                --file Dockerfile .
             """
           }
         }
@@ -46,7 +42,10 @@ pipeline {
       steps {
         script {
           sh """
-            sed 's|REPLACE_IMAGE|${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml > k8s/deployment_rendered.yaml
+            echo "⚙️ Updating manifests with new image..."
+            sed 's|REPLACE_IMAGE|${ACR_NAME}.azurecr.io/${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml > k8s/deployment_rendered.yaml
+
+            echo "🚢 Applying Kubernetes manifests..."
             kubectl apply -f k8s/deployment_rendered.yaml
             kubectl apply -f k8s/service.yaml
             kubectl apply -f k8s/ingress.yaml
