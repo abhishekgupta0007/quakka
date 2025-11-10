@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: demo-app
+  namespace: default
   labels:
     app: demo-app
 spec:
@@ -21,8 +22,9 @@ spec:
     spec:
       containers:
       - name: demo-app
+        # 🧠 Jenkins dynamically replaces REPLACE_IMAGE with your built ACR image
         image: REPLACE_IMAGE
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
         - containerPort: 3000
         resources:
@@ -32,3 +34,19 @@ spec:
           limits:
             cpu: "500m"
             memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      imagePullSecrets:
+      - name: acr-auth
+      restartPolicy: Always
+
