@@ -1,70 +1,56 @@
 pipeline {
   agent any
 
-  options {
-    disableConcurrentBuilds()
-  }
-
   environment {
-    ACR_LOGIN = "demoacrg4p93s.azurecr.io"
-    IMAGE_NAME = "demo-app"
-    IMAGE_TAG = "v${env.BUILD_NUMBER}"
-    KUBE_NS = "default"
-    GIT_REPO = "https://github.com/abhishekgupta0007/quakka.git"
-    GIT_BRANCH = "devops-assessment"
-  }
-
-  triggers {
-    githubPush()
+    GIT_REPO = 'https://github.com/abhishekgupta0007/quakka.git'
+    GIT_BRANCH = 'devops-assessment'
+    IMAGE_NAME = 'demo-app'
+    ACR_NAME = 'demoacrg4p93s.azurecr.io'
+    IMAGE_TAG = "v${BUILD_NUMBER}"
+    AKS_NAMESPACE = 'default'
   }
 
   stages {
+
     stage('Checkout') {
       steps {
-        git branch: env.GIT_BRANCH,
-            url: env.GIT_REPO,
+        git branch: "${GIT_BRANCH}", url: "${GIT_REPO}"
       }
     }
 
     stage('Build Docker image') {
       steps {
-        sh '''
-          echo "Building ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}"
-          docker build -t ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG} .
-        '''
+        script {
+          echo "Building image ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}"
+          sh """
+            docker build -t ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG} .
+          """
+        }
       }
     }
 
     stage('Login & Push to ACR') {
       steps {
-        withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
-          sh '''
-            echo "Logging in to ACR..."
-            echo "$ACR_PASS" | docker login ${ACR_LOGIN} -u "$ACR_USER" --password-stdin
-            echo "Pushing image..."
-            docker push ${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}
-          '''
+        script {
+          withCredentials([usernamePassword(credentialsId: 'acr-aks-credentials', usernameVariable: 'ACR_USER', passwordVariable: 'ACR_PASS')]) {
+            sh """
+              echo $ACR_PASS | docker login ${ACR_NAME} -u $ACR_USER --password-stdin
+              docker push ${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}
+            """
+          }
         }
       }
     }
 
     stage('Deploy to AKS') {
       steps {
-        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-          sh '''
-            export KUBECONFIG="$KUBECONFIG_FILE"
-            echo "Deploying image to AKS..."
-
-            if kubectl get deployment demo-app -n ${KUBE_NS} >/dev/null 2>&1; then
-              kubectl set image deployment/demo-app demo-app=${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG} -n ${KUBE_NS} --record
-            else
-              sed "s|REPLACE_IMAGE|${ACR_LOGIN}/${IMAGE_NAME}:${IMAGE_TAG}|g" k8s/deployment.yaml | kubectl apply -f -
-              kubectl apply -f k8s/service.yaml
-              kubectl apply -f k8s/ingress.yaml
-            fi
-
-            kubectl rollout status deployment/demo-app -n ${KUBE_NS} --timeout=180s
-          '''
+        script {
+          sh """
+            sed 's|REPLACE_IMAGE|${ACR_NAME}/${IMAGE_NAME}:${IMAGE_TAG}|' k8s/deployment.yaml > k8s/deployment_rendered.yaml
+            kubectl apply -f k8s/deployment_rendered.yaml
+            kubectl apply -f k8s/service.yaml
+            kubectl apply -f k8s/ingress.yaml
+          """
         }
       }
     }
